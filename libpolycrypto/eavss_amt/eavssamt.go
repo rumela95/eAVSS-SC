@@ -2,7 +2,7 @@
 // A. Kate, et al.
 // Constant-Size Commitments to Polynomials and Their Applications.
 
-package evss
+package eavss_amt
 
 import (
 	"crypto/rand"
