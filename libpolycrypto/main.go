@@ -224,22 +224,22 @@ func peers(overlay *kademlia.Protocol) {
 
 // peers prints out all peers we are already aware of.
 func startEavssSC(overlay *kademlia.Protocol, node *noise.Node) {
-	// ids := overlay.Table().Peers()
-	// count := len(ids)
+	ids := overlay.Table().Peers()
+	count := len(ids)
 	fmt.Println("Now eavss")
-	// sh := eavss.EavssSC(big.NewInt(int64(count)))
+	sh := eavss.EavssSC(big.NewInt(int64(count)))
 	for _, id := range overlay.Table().Peers() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		// x := eachshare{mtype: "SND",
-		// 	CP:     sh.CP,
-		// 	C:      sh.C,
-		// 	W:      sh.W[i],
-		// 	polyH:  sh.polyH,
-		// 	polyK1: sh.polyK1[i],
-		// 	polyK2: sh.polyK2[i]}
-		// msg, _ := JSON.Marshal(x)
+		x := eachshare{mtype: "SND",
+			CP:     sh.CP,
+			C:      sh.C,
+			W:      sh.W[i],
+			polyH:  sh.polyH,
+			polyK1: sh.polyK1[i],
+			polyK2: sh.polyK2[i]}
+		msg, _ := JSON.Marshal(x)
 		line := "Send received from dealer"
-		err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+		err := node.SendMessage(ctx, id.Address, &x)
 		cancel()
 
 		if err != nil {
