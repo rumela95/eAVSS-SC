@@ -17,37 +17,45 @@ import (
 // 	G2P []bn256.G2
 // 	G2H []bn256.G2
 // }
-type eachshare struct {
-	mtype  string      `json:"mtype"`
-	ind    int         `json:"ind"`
+type Eachshare struct {
+	Mtype  string      `json:"mtype"`
+	Ind    int         `json:"ind"`
 	CP     *bn256.G2   `json:"CP"`
 	C      []*bn256.G2 `json:"C"`
 	W      []*bn256.G1 `json:"W"`
-	polyH  []*big.Int  `json:"polyH"`
-	polyK1 []*big.Int  `json:"polyK1"`
-	polyK2 []*big.Int  `json:"polyK2"`
+	PolyH  []*big.Int  `json:"polyH"`
+	PolyK1 []*big.Int  `json:"polyK1"`
+	PolyK2 []*big.Int  `json:"polyK2"`
 }
 
-type ready struct {
-	mtype string    `json:"mtype"`
-	ind   int       `json:"ind"`
+type Ready struct {
+	Mtype string    `json:"mtype"`
+	Ind   int       `json:"ind"`
 	CP    *bn256.G2 `json:"CP"`
 }
 
-type echo struct {
-	mtype string    `json:"mtype"`
+type Echo struct {
+	Mtype string    `json:"mtype"`
 	CP    *bn256.G2 `json:"CP"`
 }
 
-type share struct {
-	mtype  string
+type Share struct {
+	Mtype  string
 	Pk     polycommit.Pk_ped
 	CP     *bn256.G2
 	C      []*bn256.G2
 	W      [][]*bn256.G1
-	polyH  []*big.Int
-	polyK1 [][]*big.Int
-	polyK2 [][]*big.Int
+	PolyH  []*big.Int
+	PolyK1 [][]*big.Int
+	PolyK2 [][]*big.Int
+}
+
+type Poly struct {
+	coeff []*big.Int
+}
+
+type G struct {
+	coeff []*bn256.G1
 }
 
 // const (
@@ -97,8 +105,7 @@ func valueOfPoly(poly []*big.Int, i *big.Int) *big.Int {
 
 }
 
-// func EavssSC(n *big.Int) *share {
-func EavssSC(n *big.Int) {
+func EavssSC(n *big.Int) *Share {
 	t := n.Div(n.Sub(n, big.NewInt(1)), big.NewInt(3))
 	polyP := generatePoly(rand.Reader, int(t.Int64())+1)
 	polyC := generatePoly(rand.Reader, int(t.Int64())+1)
@@ -112,6 +119,11 @@ func EavssSC(n *big.Int) {
 	H := make([]*hmap.G1, n.Int64())
 	pk1.Setup2(rand.Reader, int(t.Int64())+1)
 	pk2.Setup2(rand.Reader, int(n.Int64())+1)
+	_, Ga, _ := bn256.RandomG1(rand.Reader)
+	if Ga != nil {
+		fmt.Println(Ga.String())
+	}
+	// fmt.Println("Commiting to polynomial")
 	no_pl := int(n.Int64())
 	for j := 0; j < no_pl; j++ {
 		polyP[0] = valueOfPoly(PolyPY, big.NewInt(int64(j)))
@@ -120,6 +132,10 @@ func EavssSC(n *big.Int) {
 		polyC[0] = valueOfPoly(PolyCY, big.NewInt(int64(j)))
 		K2 := polyC
 		polyK2[j] = K2
+		_, Ga, _ := bn256.RandomG1(rand.Reader)
+		if Ga != nil {
+			fmt.Println(Ga.String())
+		}
 		C[j], _ = pk1.Commit_Ped(K1, K2)
 		if C[j] != nil {
 			fmt.Println(C[j].String())
@@ -147,22 +163,16 @@ func EavssSC(n *big.Int) {
 	polyH := generatePoly(rand.Reader, int(n.Int64())+1)
 	polyHX := generatePoly(rand.Reader, int(n.Int64())+1)
 	CP, _ := pk2.Commit_Ped(polyHX, polyH)
-	if CP != nil {
-		fmt.Println(CP.String())
-	} else {
-		fmt.Println("hello")
-
-	}
-	// mtype := "SND"
-	// return &share{
-	// 	mtype,
-	// 	pk1,
-	// 	CP,
-	// 	C,
-	// 	W,
-	// 	polyH,
-	// 	polyK1,
-	// 	polyK2}
+	Mtype := "SND"
+	return &Share{
+		Mtype,
+		pk1,
+		CP,
+		C,
+		W,
+		polyH,
+		polyK1,
+		polyK2}
 }
 
 func printbig(k *big.Int) {
@@ -170,9 +180,9 @@ func printbig(k *big.Int) {
 	fmt.Println(bigstr)
 }
 
-func VerifyShare(pi *polycommit.Pk_ped, sh *eachshare) bool {
+func VerifyShare(pi *polycommit.Pk_ped, sh *Eachshare) bool {
 	for i, _ := range sh.W {
-		if !pi.VerifyEval(sh.C[i], big.NewInt(int64(sh.ind)), valueOfPoly(sh.polyK1, big.NewInt(int64(sh.ind))), sh.W[i]) {
+		if !pi.VerifyEval(sh.C[i], big.NewInt(int64(sh.Ind)), valueOfPoly(sh.PolyK1, big.NewInt(int64(sh.Ind))), sh.W[i]) {
 			fmt.Println("verify failed")
 		}
 
@@ -235,4 +245,34 @@ func VerifyShare(pi *polycommit.Pk_ped, sh *eachshare) bool {
 // 	eavss_sc(big.NewInt(int64(10)))
 // 	fmt.Println("Now complete")
 
+// // }
+// func (sh *Eachshare) Marshal() ([]byte, error) {
+// 	var sSh pb.Eachshare
+// 	// sSh.Index = sh.Index.Bytes()
+// 	// sSh.Result = sh.Result.Bytes()
+// 	// sSh.Witness = sh.Witness.Marshal()
+// 	sSh.Mtype = sh.Mtype.getB
+// 	sSh.CP = sh.CP.Bytes()
+// 	sSh.C = sh.C.Bytes()
+// 	sSh.W = sh.W.Marshal()
+// 	sSh.PolyH = sh.PolyH.Marshal()
+// 	sSh.PolyK1 = sh.PolyK1.Marshal()
+// 	sSh.PolyK2 = sh.PolyK2.Bytes()
+// 	return proto.Marshal(&sSh)
+// }
+
+// // Deserialize the share.
+// func (sh *Share) Unmarshal(b []byte) error {
+// 	var sSh pb.Share
+// 	err := proto.Unmarshal(b, &sSh)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if sh == nil {
+// 		sh = new(Share)
+// 	}
+// 	sh.Index.SetBytes(sSh.Index)
+// 	sh.Result.SetBytes(sSh.Result)
+// 	_, err = sh.Witness.Unmarshal(sSh.Witness)
+// 	return err
 // }

@@ -12,27 +12,28 @@ import (
 	"strings"
 	"time"
 
-	xbn256 "github.com/ethereum/go-ethereum/crypto/bn256/cloudflare"
+	// "github.com/cloudflare/bn256"
+
 	"github.com/perlin-network/noise"
 	"github.com/perlin-network/noise/kademlia"
 	"github.com/spf13/pflag"
+	"github.com/zhtluo/libpolycrypto/eavss"
+	"github.com/zhtluo/libpolycrypto/eavss_amt"
 )
 
 var (
 	hostFlag    = pflag.IPP("host", "h", nil, "binding host")
 	portFlag    = pflag.Uint16P("port", "p", 0, "binding port")
 	addressFlag = pflag.StringP("address", "a", "", "publicly reachable network address")
+	snd_c       = 0
+	rds_c       = 0
+	eco_c       = 0
+	rd          = 0
 )
-
-type eachshare struct {
-	mtype  string       `json:"mtype"`
-	CP     *xbn256.G2   `json:"CP"`
-	C      []*xbn256.G2 `json:"C"`
-	W      []*xbn256.G1 `json:"W"`
-	polyH  []*big.Int   `json:"polyH"`
-	polyK1 []*big.Int   `json:"polyK1"`
-	polyK2 []*big.Int   `json:"polyK2"`
-}
+var node *noise.Node
+var overlay *kademlia.Protocol
+var noOfNodes int
+var t int
 
 type chatMessage struct {
 	contents string
@@ -62,11 +63,12 @@ func main() {
 	pflag.Parse()
 
 	// Create a new configured node.
-	node, err := noise.NewNode(
+	n, err := noise.NewNode(
 		noise.WithNodeBindHost(*hostFlag),
 		noise.WithNodeBindPort(*portFlag),
 		noise.WithNodeAddress(*addressFlag),
 	)
+	node = n
 	check(err)
 
 	// Release resources associated to node at the end of the program.
@@ -88,7 +90,7 @@ func main() {
 		},
 	}
 
-	overlay := kademlia.New(kademlia.WithProtocolEvents(events))
+	overlay = kademlia.New(kademlia.WithProtocolEvents(events))
 
 	// Bind Kademlia to the node.
 	node.Bind(overlay.Protocol())
@@ -165,10 +167,179 @@ func handle(ctx noise.HandlerContext) error {
 	// 	fmt.Printf("Nothing from eavss\n")
 	// 	return nil
 	// }
+	mt := strings.Split(msg.contents, "@")
+	if mt[1] == "SND" {
+		sendReceived(ctx, msg.contents)
+	} else if mt[1] == "ECO" {
+		ecoReceived(ctx, msg.contents)
+	} else if mt[1] == "RDS" {
+		if rd > 0 {
+			rdyReceived(ctx, msg.contents)
 
-	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], msg)
+		} else {
+			sndRdy(ctx, msg.contents)
+		}
+
+	}
+
+	// fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], msg.contents)
 
 	return nil
+}
+
+func sendReceived(ctx noise.HandlerContext, m string) {
+	snd_c = snd_c + 1
+	// ids := overlay.Table().Peers()
+	// count := len(ids)
+	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], m)
+	// sh := eavss.EavssSC(big.NewInt(int64(count)))
+	//verify
+	echo_m := "ECO"
+	k := 0
+	for _, id := range overlay.Table().Peers() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		// x := eachshare{mtype: "SND",
+		// 	CP:     sh.CP,
+		// 	C:      sh.C,
+		// 	W:      sh.W[k],
+		// 	polyH:  sh.PolyH,
+		// 	polyK1: sh.PolyK1[k],
+		// 	polyK2: sh.PolyK2[k]}
+		// msg, _ := JSON.Marshal(x)
+		line := fmt.Sprintf("%d@%s", k, echo_m)
+		fmt.Println(line)
+		err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+		cancel()
+		k = k + 1
+
+		if err != nil {
+			fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+				id.Address,
+				id.ID.String()[:printedLength],
+				err,
+			)
+			continue
+		}
+	}
+	fmt.Println("Echo messages sent")
+
+}
+
+func ecoReceived(ctx noise.HandlerContext, m string) {
+	eco_c = eco_c + 1
+
+	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], m)
+	if eco_c >= noOfNodes-t {
+		ready_m := "RDS"
+		k := 0
+		for _, id := range overlay.Table().Peers() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			// x := eachshare{mtype: "SND",
+			// 	CP:     sh.CP,
+			// 	C:      sh.C,
+			// 	W:      sh.W[k],
+			// 	polyH:  sh.PolyH,
+			// 	polyK1: sh.PolyK1[k],
+			// 	polyK2: sh.PolyK2[k]}
+			// msg, _ := JSON.Marshal(x)
+			line := fmt.Sprintf("%d@%s", k, ready_m)
+			err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+			cancel()
+			k = k + 1
+
+			if err != nil {
+				fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+					id.Address,
+					id.ID.String()[:printedLength],
+					err,
+				)
+				continue
+			}
+		}
+		rd = rd + 1
+		fmt.Println("Ready message sent")
+	} else {
+		fmt.Println("Waiting for n-t echo messages..")
+	}
+
+}
+
+func rdyReceived(ctx noise.HandlerContext, m string) {
+	rds_c = rds_c + 1
+
+	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], m)
+	if rds_c >= noOfNodes-t {
+		rec_m := "REC"
+		k := 0
+		for _, id := range overlay.Table().Peers() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			// x := eachshare{mtype: "SND",
+			// 	CP:     sh.CP,
+			// 	C:      sh.C,
+			// 	W:      sh.W[k],
+			// 	polyH:  sh.PolyH,
+			// 	polyK1: sh.PolyK1[k],
+			// 	polyK2: sh.PolyK2[k]}
+			// msg, _ := JSON.Marshal(x)
+			line := fmt.Sprintf("%d@%s", k, rec_m)
+			err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+			cancel()
+			k = k + 1
+
+			if err != nil {
+				fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+					id.Address,
+					id.ID.String()[:printedLength],
+					err,
+				)
+				continue
+			}
+		}
+		rd = rd + 1
+		fmt.Println("Sharing Phase complete")
+	} else {
+		fmt.Println("Waiting for n-t ready messages..")
+	}
+
+}
+
+func sndRdy(ctx noise.HandlerContext, m string) {
+	rds_c = rds_c + 1
+
+	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], m)
+	if rds_c >= noOfNodes-t {
+		ready_m := "RDS"
+		k := 0
+		for _, id := range overlay.Table().Peers() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			// x := eachshare{mtype: "SND",
+			// 	CP:     sh.CP,
+			// 	C:      sh.C,
+			// 	W:      sh.W[k],
+			// 	polyH:  sh.PolyH,
+			// 	polyK1: sh.PolyK1[k],
+			// 	polyK2: sh.PolyK2[k]}
+			// msg, _ := JSON.Marshal(x)
+			line := fmt.Sprintf("%d@%s", k, ready_m)
+			err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+			cancel()
+			k = k + 1
+
+			if err != nil {
+				fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+					id.Address,
+					id.ID.String()[:printedLength],
+					err,
+				)
+				continue
+			}
+		}
+		rd = rd + 1
+		fmt.Println("Ready Message sent")
+	} else {
+		fmt.Println("Waiting for n-t ready messages..")
+	}
+
 }
 
 // help prints out the users ID and commands available.
@@ -226,21 +397,26 @@ func peers(overlay *kademlia.Protocol) {
 func startEavssSC(overlay *kademlia.Protocol, node *noise.Node) {
 	ids := overlay.Table().Peers()
 	count := len(ids)
+	noOfNodes = count
+	t = (noOfNodes - 1) / 3
 	fmt.Println("Now eavss")
 	sh := eavss.EavssSC(big.NewInt(int64(count)))
+	k := 0
+	// var x pb.Eachshare
 	for _, id := range overlay.Table().Peers() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		x := eachshare{mtype: "SND",
-			CP:     sh.CP,
-			C:      sh.C,
-			W:      sh.W[i],
-			polyH:  sh.polyH,
-			polyK1: sh.polyK1[i],
-			polyK2: sh.polyK2[i]}
-		msg, _ := JSON.Marshal(x)
-		line := "Send received from dealer"
-		err := node.SendMessage(ctx, id.Address, &x)
+		// x := eavss.Eachshare{Mtype: "SND",
+		// 	CP:     sh.CP,
+		// 	C:      sh.C,
+		// 	W:      sh.W[k],
+		// 	PolyH:  sh.PolyH,
+		// 	PolyK1: sh.PolyK1[k],
+		// 	PolyK2: sh.PolyK2[k]}
+		// msg, _ := proto.Marshal(x)
+		line := fmt.Sprintf("%d@%s", k, sh.Mtype)
+		err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
 		cancel()
+		k = k + 1
 
 		if err != nil {
 			fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
@@ -251,7 +427,36 @@ func startEavssSC(overlay *kademlia.Protocol, node *noise.Node) {
 			continue
 		}
 	}
-	fmt.Println("Now complete")
+	// fmt.Println("Now complete")
+
+}
+
+func startEavssSCAMT(overlay *kademlia.Protocol, node *noise.Node) {
+	ids := overlay.Table().Peers()
+	count := len(ids)
+	noOfNodes = count
+	t = (noOfNodes - 1) / 3
+	fmt.Println("Now eavss-SC")
+	sh := eavss_amt.EavssSCAMT(big.NewInt(int64(count)))
+	k := 0
+	// var x pb.Eachshare
+	for _, id := range overlay.Table().Peers() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		line := fmt.Sprintf("%d@%s", k, sh.Mtype)
+		err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+		cancel()
+		k = k + 1
+
+		if err != nil {
+			fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+				id.Address,
+				id.ID.String()[:printedLength],
+				err,
+			)
+			continue
+		}
+	}
+	// fmt.Println("Now complete")
 
 }
 
@@ -263,6 +468,9 @@ func chat(node *noise.Node, overlay *kademlia.Protocol, line string) {
 		return
 	case "/start":
 		startEavssSC(overlay, node)
+		return
+	case "/startAMT":
+		startEavssSCAMT(overlay, node)
 		return
 	case "/peers":
 		peers(overlay)

@@ -1,0 +1,44 @@
+syntax = "proto3" ;
+package proto ;
+
+option go_package = "github.com/zhtluo/libpolycrypto/proto";
+
+message Poly {
+	repeated bytes coeff = 1;
+}
+
+message G {
+	repeated bytes coeff = 1;
+}
+
+message Eachshare{
+	string mtype = 1;
+	bytes CP = 2;
+	repeated bytes C = 3;
+	repeated bytes W = 4;
+	repeated bytes PolyH = 5;
+	repeated bytes PolyK1 = 6;
+	repeated bytes PolyK2 = 7;
+}
+
+message Ready {
+    bytes mtype = 1;
+    int32 Ind = 2;
+	bytes CP = 3;
+}
+
+message Echo{
+	string mtype = 1;
+	bytes CP = 2;
+}
+
+message Share {
+	string Mtype = 1;
+	bytes Pk = 2;
+	bytes CP = 3;
+	repeated bytes C = 4;
+	repeated G W =  5;
+	repeated bytes PolyH = 6;
+	repeated Poly PolyK1 = 7;
+	repeated Poly PolyK2 = 8;
+}

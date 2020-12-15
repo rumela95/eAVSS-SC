@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/cloudflare/bn256 v0.0.0-20201110172847-66a4f6353b47
 	github.com/ethereum/go-ethereum v1.9.23
-	github.com/golang/protobuf v1.4.2
+	github.com/golang/protobuf v1.4.3
 	github.com/keegancsmith/rpc v1.3.0 // indirect
 	github.com/mdempsky/gocode v0.0.0-20200405233807-4acdcbdea79d // indirect
 	github.com/nsf/gocode v0.0.0-20190302080247-5bee97b48836 // indirect

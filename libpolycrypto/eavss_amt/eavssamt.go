@@ -1,189 +1,272 @@
-// Package evss implements eVSS found in section 4.1,
-// A. Kate, et al.
-// Constant-Size Commitments to Polynomials and Their Applications.
-
 package eavss_amt
 
 import (
+	"fmt"
+
 	"crypto/rand"
 	"io"
 	"math/big"
 
+	hmap "github.com/cloudflare/bn256"
 	bn256 "github.com/ethereum/go-ethereum/crypto/bn256/cloudflare"
+	"github.com/zhtluo/libpolycrypto/amt"
 	"github.com/zhtluo/libpolycrypto/polycommit"
-	pb "github.com/zhtluo/libpolycrypto/proto"
-	"google.golang.org/protobuf/proto"
 )
 
-var (
-	MaxInt = bn256.Order
-)
-
-// Struct PublicInfo implements the public information available at the start of the phase.
-type PublicInfo struct {
-	Pk     polycommit.Pk
-	Commit bn256.G2
+// type Pk_ped struct {
+// 	G1P []bn256.G1
+// 	G2P []bn256.G2
+// 	G2H []bn256.G2
+// }
+type Eachshare struct {
+	Mtype  string      `json:"mtype"`
+	Ind    int         `json:"ind"`
+	CP     *bn256.G2   `json:"CP"`
+	C      []*bn256.G2 `json:"C"`
+	W      []*bn256.G1 `json:"W"`
+	PolyH  []*big.Int  `json:"polyH"`
+	PolyK1 []*big.Int  `json:"polyK1"`
+	PolyK2 []*big.Int  `json:"polyK2"`
 }
 
-// Struct Secret implements the secret the dealer wishes to share.
-type Secret struct {
-	Poly []big.Int
+type Ready struct {
+	Mtype string    `json:"mtype"`
+	Ind   int       `json:"ind"`
+	CP    *bn256.G2 `json:"CP"`
 }
 
-// Struct Secret implements the share of each node.
+type Echo struct {
+	Mtype string    `json:"mtype"`
+	CP    *bn256.G2 `json:"CP"`
+}
+
 type Share struct {
-	Index   big.Int
-	Result  big.Int
-	Witness bn256.G1
+	Mtype  string
+	Pk     polycommit.Pk_ped
+	CP     *bn256.G2
+	C      []*bn256.G2
+	W      [][]*bn256.G1
+	PolyH  []*big.Int
+	PolyK1 [][]*big.Int
+	PolyK2 [][]*big.Int
 }
 
-// Generate a secret with the constant term specified.
-func GenerateSecret(r io.Reader, constant *big.Int, degree int) (*Secret, error) {
-	s := new(Secret)
-	s.Poly = make([]big.Int, degree)
-	s.Poly[0] = *constant
-	for i := 1; i < degree; i++ {
-		r, err := rand.Int(r, bn256.Order)
-		if err != nil {
-			return nil, err
+type Poly struct {
+	coeff []*big.Int
+}
+
+type G struct {
+	coeff []*bn256.G1
+}
+
+// const (
+// 	deg = 3
+// )
+
+// func generatePolyX(r io.Reader) []big.Int {
+// 	poly := make([]big.Int, deg+1)
+// 	for i, _ := range poly {
+// 		var p *big.Int
+// 		p, _ = rand.Int(r, bn256.Order)
+// 		poly[i] = *p
+// 		bigstr := fmt.Sprint(poly[i])
+// 		fmt.Println(bigstr)
+// 	}
+// 	return poly
+// }
+
+func generatePoly(r io.Reader, deg int) []*big.Int {
+	poly := make([]*big.Int, deg)
+	for i, _ := range poly {
+		var p *big.Int
+		p, _ = rand.Int(r, bn256.Order)
+		poly[i] = &*p
+		bigstr := fmt.Sprint(*poly[i])
+		fmt.Println(bigstr)
+	}
+	return poly
+}
+
+func generateYPoly(poly []*big.Int) []*big.Int {
+	polyY := poly
+	return polyY
+}
+
+func valueOfPoly(poly []*big.Int, i *big.Int) *big.Int {
+	res := new(big.Int)
+	for i, _ := range poly {
+		x2 := big.NewInt(int64(i))
+		for j := 2; j < i; j++ {
+			x2.Mul(x2, x2)
 		}
-		s.Poly[i] = *r
+		res.Add(res, poly[i].Mul(poly[i], x2))
 	}
-	return s, nil
+
+	return res
+
 }
 
-// Generate public information with the secret.
-func GeneratePublicInfo(r io.Reader, s *Secret) (*PublicInfo, error) {
-	assertInclusiveRange(0, id, params.n - 1);
+func EavssSCAMT(n *big.Int) *Share {
+	t := n.Div(n.Sub(n, big.NewInt(1)), big.NewInt(3))
+	polyP := generatePoly(rand.Reader, int(t.Int64())+1)
+	polyC := generatePoly(rand.Reader, int(t.Int64())+1)
+	PolyPY := generateYPoly(polyP)
+	PolyCY := generateYPoly(polyC)
+	polyK1 := make([][]*big.Int, n.Int64())
+	polyK2 := make([][]*big.Int, n.Int64())
+	W := make([][]*bn256.G1, n.Int64())
+	var pk1, pk2 polycommit.Pk_ped
+	C := make([]*bn256.G2, n.Int64())
+	H := make([]*hmap.G1, n.Int64())
+	pk1.Setup2(rand.Reader, int(t.Int64())+1)
+	pk2.Setup2(rand.Reader, int(n.Int64())+1)
+	no_pl := int(n.Int64())
+	for j := 0; j < no_pl; j++ {
+		polyP[0] = valueOfPoly(PolyPY, big.NewInt(int64(j)))
+		K1 := polyP
+		polyK1[j] = K1
+		polyC[0] = valueOfPoly(PolyCY, big.NewInt(int64(j)))
+		K2 := polyC
+		polyK2[j] = K2
+		C[j], _ = pk1.Commit_Ped(K1, K2)
+		if C[j] != nil {
+			fmt.Println(C[j].String())
+		} else {
+			fmt.Println("hello")
 
-        // the accumulators in the multipoint evaluation tree have max degree N = 2^k, where N is the smallest value such that n <= N
-        if(kpp.g2si.size() < params.t - 1) {
-            throw std::runtime_error("Need more public parameters for the specified number of players (for accumulators)");
-        }
-
-        allProofs.reset(new AllAmtProofs(params));
-        allProofs->addVerificationHelpers(id);
-	return pi, nil
-}
-
-// Generate a share based on the information and the secret.
-func GenerateShare(pi *PublicInfo, s *Secret, index *big.Int) (*Share, error) {
-	sh := new(Share)
-	assertNotNull(eval);
-        assertNotNull(allProofs);
-
-        auto proofs = dynamic_cast<AllAmtProofs*>(allProofs.get());
-        proofs->computeAllProofs(*eval, isSimulated());
-
-        eval.reset(nullptr); // don't need the multipoint eval after
-
-        // compute constant-sized proof for p(0)
-        proofs->setZeroProof(
-            std::get<0>(
-                kateProve(Fr::zero())
-            )
-        );
-	return sh, nil
-}
-
-// Verify the received share with the public information.
-func VerifyShare(pi *PublicInfo, sh *Share) bool {
-
-	assertNotNull(eval);
-        assertNotNull(allProofs);
-
-        auto proofs := dynamic_cast<AllAmtProofs*>(allProofs.get());
-        proofs.computeAllProofs(*eval, isSimulated());
-
-        eval.reset(nullptr); // don't need the multipoint eval after
-
-        // compute constant-sized proof for p(0)
-        Fr s := kpp.getTrapdoor();
-        Fr pOfS := libfqfft::evaluate_polynomial(f_id.size(), f_id, s);
-        assertEqual(comm, pOfS * G1::one());
-        allProofs->setZeroProof(
-            ( (pOfS - f_id[0])*s.inverse() ) * G1::one());
-	return pi.Pk.VerifyEval(&pi.Commit, &sh.Index, &sh.Result, &sh.Witness)
-}
-
-// Reconstruct the constant term of the secret with shares.
-func ReconstructSecret(shs []Share) *big.Int {
-	inverse := make([]big.Int, len(shs))
-	for i := range inverse {
-		inverse[i].ModInverse(&shs[i].Index, bn256.Order)
-	}
-	constant := big.NewInt(0)
-	// Order + 1
-	orders1 := new(big.Int).Add(bn256.Order, big.NewInt(1))
-	for i := range shs {
-		partial := new(big.Int).ModInverse(&shs[i].Result, bn256.Order)
-		for j := range shs {
-			if i != j {
-				// p = p * (1 - x_i * x_j^-1)
-				term := new(big.Int).Mul(&shs[i].Index, &inverse[j])
-				term.Mod(term, bn256.Order)
-				partial.Mul(partial, new(big.Int).Sub(orders1, term))
-				partial.Mod(partial, bn256.Order)
+		}
+		Wt := make([]*bn256.G1, n.Int64())
+		for k := 0; k < no_pl; k++ {
+			res1, res2, g1, _ := pk1.CreateWitness_ped(K1, K2, big.NewInt(int64(k)))
+			Wt[k] = g1
+			if g1 != nil {
+				printbig(res1)
+				printbig(res2)
+				fmt.Println(g1.String())
 			}
 		}
-		partial.ModInverse(partial, bn256.Order)
-		constant.Mod(constant.Add(constant, partial), bn256.Order)
+		W[j] = Wt
+		if C[j] != nil {
+			x := C[j].Marshal()
+			// H[j] = hmap.HashG1(x, nil)
+			H[j] = hmap.HashG1(x, nil)
+		}
 	}
-	return constant
+	polyH := generatePoly(rand.Reader, int(n.Int64())+1)
+	polyHX := generatePoly(rand.Reader, int(n.Int64())+1)
+	CP, _ := pk2.Commit_Ped(polyHX, polyH)
+	Mtype := "SND"
+	return &Share{
+		Mtype,
+		pk1,
+		CP,
+		C,
+		W,
+		polyH,
+		polyK1,
+		polyK2}
 }
 
-// Serialize the public infomation.
-func (pi *PublicInfo) Marshal() ([]byte, error) {
-	var sPi pb.PublicInfo
-	var err error
-	sPi.Pk, err = pi.Pk.Marshal()
-	if err != nil {
-		return nil, err
-	}
-	sPi.Commit = pi.Commit.Marshal()
-	return proto.Marshal(&sPi)
+func printbig(k *big.Int) {
+	bigstr := fmt.Sprint(k)
+	fmt.Println(bigstr)
 }
 
-// Deserialize the public infomation.
-func (pi *PublicInfo) Unmarshal(b []byte) error {
-	var sPi pb.PublicInfo
-	err := proto.Unmarshal(b, &sPi)
-	if err != nil {
-		return err
+func VerifyShare(pi *polycommit.Pk_ped, sh *Eachshare) bool {
+	for i, _ := range sh.W {
+		g2, err := amt.Evaluate(pi, sh.PolyK1)
+		if err != nil {
+			fmt.Printf("verify failed for %d", i)
+		}
+		fmt.Println(g2.String())
+
 	}
-	if pi == nil {
-		pi = new(PublicInfo)
-	}
-	err = pi.Pk.Unmarshal(sPi.Pk)
-	if err != nil {
-		return err
-	}
-	_, err = pi.Commit.Unmarshal(sPi.Commit)
-	return err
+	return true
+	// return pi.VerifyEval(&sh.C, &sh.ind, valueOfPoly(sh.polyK1, &sh.ind), &sh.W)
 }
 
-// Serialize the share.
-func (sh *Share) Marshal() ([]byte, error) {
-	var sSh pb.Share
-	sSh.Index = sh.Index.Bytes()
-	sSh.Result = sh.Result.Bytes()
-	sSh.Witness = sh.Witness.Marshal()
-	return proto.Marshal(&sSh)
-}
+// func main() {
+// 	// *testing.T t
 
-// Deserialize the share.
-func (sh *Share) Unmarshal(b []byte) error {
-	var sSh pb.Share
-	err := proto.Unmarshal(b, &sSh)
-	if err != nil {
-		return err
-	}
-	if sh == nil {
-		sh = new(Share)
-	}
-	sh.Index.SetBytes(sSh.Index)
-	sh.Result.SetBytes(sSh.Result)
-	_, err = sh.Witness.Unmarshal(sSh.Witness)
-	return err
-}
+// 	// var x, _ = new(big.Int).SetString("21888242871839275222246405745257275088696311157297823662689037894645226208583", 10)
+// 	// var y, _ = new(big.Int).SetString("21888242871839275222246405745257275088696311157297823662689034329847938743243", 10)
 
+// 	// fmt.Println(BigIntToHexStr(x))
+// 	// fmt.Println(BigIntToStr(x))
+
+// 	// pt := bigPoint{x, y}
+// 	// strPt := strBigPoint{fmt.Sprintf("%v", x), fmt.Sprintf("%v", y)}
+
+// 	// objPt, err := json.Marshal(pt)
+// 	// if err != nil {
+// 	// 	panic(fmt.Errorf("could not serialize pt to json"))
+// 	// }
+
+// 	// objStrPt, err := json.Marshal(strPt)
+// 	// if err != nil {
+// 	// 	panic(fmt.Errorf("could not serialize strPt to json"))
+// 	// }
+
+// 	// fmt.Printf("%v\n", string(objPt))
+// 	// fmt.Printf("%v\n", string(objStrPt))
+
+// 	var pk polycommit.Pk
+// 	pk.Setup(rand.Reader, deg+1)
+// 	poly := generatePolyX(rand.Reader)
+// 	g2, _ := pk.Commit(poly)
+// 	if g2 != nil {
+// 		fmt.Println(g2.String())
+// 	} else {
+// 		fmt.Println("hello1")
+
+// 	}
+
+// 	// if err != nil {
+// 	// 	// t.Error(err.Error())
+// 	// 	fmt.Println(err.Error())
+// 	// }
+// 	// // flag := pk.VerifyPoly(poly, g2)
+// 	// if flag != true {
+// 	// 	// t.Error("VerifyPoly failed, expected: true.")
+// 	// }
+// 	// poly = generatePoly(rand.Reader)
+// 	// // flag = pk.VerifyPoly(poly, g2)
+// 	// if flag != false {
+// 	// 	// t.Error("VerifyPoly failed, expected: false.")
+// 	// }
+
+// 	fmt.Println("Now eavss")
+// 	eavss_sc(big.NewInt(int64(10)))
+// 	fmt.Println("Now complete")
+
+// // }
+// func (sh *Eachshare) Marshal() ([]byte, error) {
+// 	var sSh pb.Eachshare
+// 	// sSh.Index = sh.Index.Bytes()
+// 	// sSh.Result = sh.Result.Bytes()
+// 	// sSh.Witness = sh.Witness.Marshal()
+// 	sSh.Mtype = sh.Mtype.getB
+// 	sSh.CP = sh.CP.Bytes()
+// 	sSh.C = sh.C.Bytes()
+// 	sSh.W = sh.W.Marshal()
+// 	sSh.PolyH = sh.PolyH.Marshal()
+// 	sSh.PolyK1 = sh.PolyK1.Marshal()
+// 	sSh.PolyK2 = sh.PolyK2.Bytes()
+// 	return proto.Marshal(&sSh)
+// }
+
+// // Deserialize the share.
+// func (sh *Share) Unmarshal(b []byte) error {
+// 	var sSh pb.Share
+// 	err := proto.Unmarshal(b, &sSh)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if sh == nil {
+// 		sh = new(Share)
+// 	}
+// 	sh.Index.SetBytes(sSh.Index)
+// 	sh.Result.SetBytes(sSh.Result)
+// 	_, err = sh.Witness.Unmarshal(sSh.Witness)
+// 	return err
+// }
